@@ -2,7 +2,7 @@
 // © DamiSneeze
 
 //@version=6
-indicator("The Method", overlay = true, calc_bars_count = 100, max_boxes_count = 500, max_lines_count = 500)
+indicator("The Method", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
 // import TradingView/ta/12
 // ^ where did this come from?
 
@@ -108,6 +108,15 @@ incorrect_tf(tf1, tf2, tf3, tf4, bool1, bool2, bool3, bool4) =>
     else if (timeframe.in_seconds(tf4) < current) and bool4
         "true"
 
+  
+//@function Takes an descending order array of specified indexes that 
+// are no longer useful and a target liquidity zone UDT array; and removes
+// the specified indexes. Descending order makes it so a removal will not
+// change the index of subsequent removals.
+garbage_collect(array<int> idxs, arr) =>
+    for idx in idxs
+        array.remove(arr, idx)
+
 //@function This function checks the last bar (low[1]/high[1]) and
 // the bar from three candles ago (low[3]/high[3]); creating
 // a FVG object after it identifies whether a gap exists
@@ -178,12 +187,8 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
             continue
         if htf_low > FVG.middle
             break
-    
-    // Going through FVG stack and adding the closed indexes as their own stack
-    // to prohibit a deleted index from changing the location of the next 
-    // FVG(s) to delete
-    for idx in closed_idxs
-        array.remove(bull_arr, idx)
+
+    garbage_collect(closed_idxs, bull_arr)
 
 update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = high) =>
     array<int> closed_idxs = array.new<int>()
@@ -212,40 +217,38 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
         if htf_high < FVG.middle
             break
     
-    for idx in closed_idxs
-        array.remove(bear_arr, idx)
-
+    garbage_collect(closed_idxs, bear_arr)
 
 detect_ob() =>
     ob OB = na
     
-    float trigger = ta.change(ta.rsi(close, 14), 1)
-    float bull_pivot = ta.lowest(2)
-    float bear_pivot = ta.highest(2)
+    float trigger = ta.change(ta.rsi(close[1], 14), 1)
+    float bull_pivot = ta.lowest(low[1], 2)
+    float bear_pivot = ta.highest(high[1], 2)
 
-    if bull_pivot - ta.lowest(7) < 0.15 and trigger > 5.5
-        chart.point x = chart.point.from_time(time, bull_pivot)
-        chart.point y = na
+    if bull_pivot - ta.lowest(low[1], 7) < 0.15 and trigger > 5.5
+        chart.point y = chart.point.from_time(time - timeframe.in_seconds() * 1000, bull_pivot)
+        chart.point x = na
         if ob_size == "Full"
-            y := low < low[1] ? chart.point.from_time(time, hl2) : chart.point.from_time(time - timeframe.in_seconds() * 1000 , hl2[1])
+            x := low[1] < low[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, hl2[1]) : chart.point.from_time(time - timeframe.in_seconds() * 2000 , hl2[2])
         else if ob_size == "Medium"
-            y := low < low[1] ? chart.point.from_time(time, ((2 * low) + high) / 3) : chart.point.from_time(time - timeframe.in_seconds() * 1000, ((2 * low[1]) + high[1]) / 3)
+            x := low[1] < low[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, ((2 * low[1]) + high[1]) / 3) : chart.point.from_time(time - timeframe.in_seconds() * 2000, ((2 * low[2]) + high[2]) / 3)
         else
-            y := low < low[1] ? chart.point.from_time(time, (hl2 + low) / 2) : chart.point.from_time(time - timeframe.in_seconds() * 1000, (hl2[1] + low[1]) / 2)
+            x := low[1] < low[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, (hl2[1] + low[1]) / 2) : chart.point.from_time(time - timeframe.in_seconds() * 2000, (hl2[2] + low[2]) / 2)
         
         string id = str.format("{0}-{1}", x.price, y.price)
         OB := ob.new(id, x, y, sentiment.BULL, status.OPEN, 0)
 
-    if bear_pivot - ta.highest(7) > -0.15 and trigger < -5.5
-        chart.point x = chart.point.from_time(time, bear_pivot)
+    if bear_pivot - ta.highest(high[1], 7) > -0.15 and trigger < -5.5
+        chart.point x = chart.point.from_time(time - timeframe.in_seconds() * 1000, bear_pivot)
         chart.point y = na
 
         if ob_size == "Full"
-            y := high > high[1] ? chart.point.from_time(time, hl2) : chart.point.from_time(time - timeframe.in_seconds() * 1000, hl2[1])
+            y := high[1] > high[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, hl2[1]) : chart.point.from_time(time - timeframe.in_seconds() * 2000, hl2[2])
         else if ob_size == "Medium"
-            y := high > high[1] ? chart.point.from_time(time, ((2 * high) + low) / 3) : chart.point.from_time(time - timeframe.in_seconds() * 1000, ((2 * high[1]) + low[1]) / 3)
+            y := high[1] > high[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, ((2 * high[1]) + low[1]) / 3) : chart.point.from_time(time - timeframe.in_seconds() * 2000, ((2 * high[2]) + low[2]) / 3)
         else
-            y := high > high[1] ? chart.point.from_time(time, (hl2 + high) / 2) : chart.point.from_time(time - timeframe.in_seconds() * 1000, (hl2[1] + high[1]) / 2)
+            y := high[1] > high[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, (hl2[1] + high[1]) / 2) : chart.point.from_time(time - timeframe.in_seconds() * 2000, (hl2[2] + high[2]) / 2)
         
         string id = str.format("{0}-{1}", x.price, y.price)
         OB := ob.new(id, x, y, sentiment.BEAR, status.OPEN, 0)
@@ -260,7 +263,70 @@ plot_ob(ob OB, array<ob> bull_arr, array<ob> bear_arr) =>
         OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.red, 80), xloc = xloc.bar_time)
         bear_arr.unshift(OB)
     
-     
+update_bullish_obs(array<ob> bull_arr, float htf_close = close, float htf_low = low) =>
+    array<int> closed_idxs = array.new<int>()
+    for [idx, OB] in bull_arr
+        float top = OB.top.price
+        float bottom = OB.bottom.price
+        if htf_close[1] < bottom
+            box.delete(OB.display)
+            array.unshift(closed_idxs, idx)
+            continue
+        if htf_close > top and OB.state != status.MITIGATED
+            break
+        if htf_close > top and OB.state == status.MITIGATED
+            OB.state := status.OPEN
+            OB.mitigation_count := 0
+            box bx = OB.display
+            bx.set_bgcolor(color.new(color.lime, 80))
+            bx.set_border_width(0)
+            continue
+        if htf_low < top and OB.state != status.OPEN
+            // if OB.mitigation_count > 5
+
+            OB.mitigation_count += 1
+            continue
+        if htf_low < top and OB.state == status.OPEN
+            OB.state := status.MITIGATED
+            box bx = OB.display
+            bx.set_bgcolor(color.new(color.silver, 80))
+            bx.set_border_width(5)
+            OB.mitigation_count := 1
+        
+    garbage_collect(closed_idxs, bull_arr)
+
+update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high = high) =>
+    array<int> closed_idxs = array.new<int>()
+    for [idx, OB] in bear_arr
+        float top = OB.top.price
+        float bottom = OB.bottom.price
+        if htf_close[1] > top
+            box.delete(OB.display)
+            array.unshift(closed_idxs, idx)
+            continue
+        if htf_close < bottom and OB.state != status.MITIGATED
+            break
+        if htf_close < bottom and OB.state == status.MITIGATED
+            OB.state := status.OPEN
+            OB.mitigation_count := 0
+            box bx = OB.display
+            bx.set_bgcolor(color.new(color.red, 80))
+            bx.set_border_width(0)
+            continue
+        if htf_high > bottom and OB.state != status.OPEN
+            // if OB.mitigation_count > 5
+
+            OB.mitigation_count += 1
+            continue
+        if htf_high > bottom and OB.state == status.OPEN
+            OB.state := status.MITIGATED
+            box bx = OB.display
+            bx.set_bgcolor(color.new(color.silver, 80))
+            bx.set_border_width(5)
+            OB.mitigation_count := 1
+        
+    garbage_collect(closed_idxs, bear_arr)
+
 
 
 // RUNTIME
@@ -352,6 +418,10 @@ if display_OBs
     ob OB = detect_ob()
     if not na(OB)
         plot_ob(OB, bull_obs, bear_obs)
+    if bull_obs.size() > 0
+        update_bullish_obs(bull_obs, close, low)
+    if bear_obs.size() > 0
+        update_bearish_obs(bear_obs, close, high)
 
     
 
