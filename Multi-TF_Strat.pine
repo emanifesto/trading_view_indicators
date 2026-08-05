@@ -9,6 +9,18 @@ indicator("The Method", overlay = true, calc_bars_count = 0, max_boxes_count = 5
 // SETTINGS
 // All customizability and inputs that this indicator will use
 
+//Group - Higher Time Frame (HTF)
+string htf1 = input.timeframe("", "HTF 1", group="HTF", inline="htf_set1", display=display.none)
+bool display_htf1 = input.bool(true, "", group="HTF", inline="htf_set1")
+string htf2 = input.timeframe("", "HTF 2", group="HTF", inline="htf_set1",  display=display.none,
+tooltip="First and second higher timeframe to detect zones of liquidity on. Can toggle each timeframe on or off individually.")
+bool display_htf2 = input.bool(true, "", group="HTF", inline="htf_set1")
+string htf3 = input.timeframe("", "HTF 3", group="HTF", inline="htf_set2", display=display.none)
+bool display_htf3 = input.bool(true, "", group="HTF", inline="htf_set2")
+string htf4 = input.timeframe("", "HTF 4", group="HTF", inline="htf_set2",  display=display.none,
+tooltip="Third and fourth higher timeframe to detect zones of liquidity on. Can toggle each timeframe on or off individually.")
+bool display_htf4 = input.bool(true, "", group="HTF", inline="htf_set2")
+
 //Group - Fair Value Gap (FVG)
 bool display_fvgs = input.bool(true, "Display FVGs", group="FVG", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
 float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, group='FVG', display=display.none,
@@ -17,17 +29,8 @@ float fvg_max_size = input.float(2, "Maximum FVG Size", minval=0, group='FVG', d
 tooltip="Determines the maximum size that a FVG can be. Can be used to prevent very large FVGs that span the chart.")
 bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", group='FVG',
 tooltip="Determines if Fair Value Gaps are pulled from multiple timeframes and displayed in an overlay.")
-string fvg_htf1 = input.timeframe("", "HTF 1", group="FVG", inline="htf_set1", display=display.none)
-bool display_fvg_htf1 = input.bool(true, "", group="FVG", inline="htf_set1")
-string fvg_htf2 = input.timeframe("", "HTF 2", group="FVG", inline="htf_set1",  display=display.none,
-tooltip="First and second higher timeframe to detect fair value gaps on. Can toggle each timeframe on or off individually.")
-bool display_fvg_htf2 = input.bool(true, "", group="FVG", inline="htf_set1")
-string fvg_htf3 = input.timeframe("", "HTF 3", group="FVG", inline="htf_set2", display=display.none)
-bool display_fvg_htf3 = input.bool(true, "", group="FVG", inline="htf_set2")
-string fvg_htf4 = input.timeframe("", "HTF 4", group="FVG", inline="htf_set2",  display=display.none,
-tooltip="Third and fourth higher timeframe to detect fair value gaps on. Can toggle each timeframe on or off individually.")
-bool display_fvg_htf4 = input.bool(true, "", group="FVG", inline="htf_set2")
 
+//Group - Order Block (OB)
 bool display_OBs = input.bool(true, "Display OBs", group="OB", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
 string ob_size = input.string("Full", "OB Size", ["Small", "Medium", "Full"], "Used to adjust the size and calcuation of an Order Block.", group="OB", display=display.none)
 
@@ -97,7 +100,7 @@ type ob
 // Reusable code that will be repeatedly called on
 
 
-incorrect_tf(tf1, tf2, tf3, tf4, bool1, bool2, bool3, bool4) =>
+incorrect_tf(string tf1, string tf2, string tf3, string tf4, bool bool1, bool bool2, bool bool3, bool bool4) =>
     int current = timeframe.in_seconds()
     if (timeframe.in_seconds(tf1) < current) and bool1
         "true"
@@ -108,7 +111,11 @@ incorrect_tf(tf1, tf2, tf3, tf4, bool1, bool2, bool3, bool4) =>
     else if (timeframe.in_seconds(tf4) < current) and bool4
         "true"
 
-  
+duplicate_tf(string htf, array<string> arr) =>
+    for tf in arr
+        if htf == tf or na(htf)
+            "true"
+
 //@function Takes an descending order array of specified indexes that 
 // are no longer useful and a target liquidity zone UDT array; and removes
 // the specified indexes. Descending order makes it so a removal will not
@@ -175,10 +182,10 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
-            box.set_extend(bx, extend.none)
+            // box.set_extend(bx, extend.none)
             box.set_bgcolor(bx, color.new(color.silver, 50))
-            line.set_x2(ln, time)
-            line.set_extend(ln, extend.none)
+            line.set_x2(ln, time + 1)
+            // line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.bottom)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.bottom)
@@ -204,10 +211,10 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
-            box.set_extend(bx, extend.none)
+            // box.set_extend(bx, extend.none)
             box.set_bgcolor(bx, color.new(color.silver, 50))
-            line.set_x2(ln, time)
-            line.set_extend(ln, extend.none)
+            line.set_x2(ln, time + 1)
+            // line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.top)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.top)
@@ -276,22 +283,15 @@ update_bullish_obs(array<ob> bull_arr, float htf_close = close, float htf_low = 
             break
         if htf_close > top and OB.state == status.MITIGATED
             OB.state := status.OPEN
-            OB.mitigation_count := 0
             box bx = OB.display
             bx.set_bgcolor(color.new(color.lime, 80))
             bx.set_border_width(0)
-            continue
-        if htf_low < top and OB.state != status.OPEN
-            // if OB.mitigation_count > 5
-
-            OB.mitigation_count += 1
             continue
         if htf_low < top and OB.state == status.OPEN
             OB.state := status.MITIGATED
             box bx = OB.display
             bx.set_bgcolor(color.new(color.silver, 80))
             bx.set_border_width(5)
-            OB.mitigation_count := 1
         
     garbage_collect(closed_idxs, bull_arr)
 
@@ -308,22 +308,15 @@ update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high =
             break
         if htf_close < bottom and OB.state == status.MITIGATED
             OB.state := status.OPEN
-            OB.mitigation_count := 0
             box bx = OB.display
             bx.set_bgcolor(color.new(color.red, 80))
             bx.set_border_width(0)
-            continue
-        if htf_high > bottom and OB.state != status.OPEN
-            // if OB.mitigation_count > 5
-
-            OB.mitigation_count += 1
             continue
         if htf_high > bottom and OB.state == status.OPEN
             OB.state := status.MITIGATED
             box bx = OB.display
             bx.set_bgcolor(color.new(color.silver, 80))
             bx.set_border_width(5)
-            OB.mitigation_count := 1
         
     garbage_collect(closed_idxs, bear_arr)
 
@@ -336,14 +329,17 @@ update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high =
 // Fair Value Gaps
 if display_fvgs
     if fvg_multiTF
-        if not na(incorrect_tf(fvg_htf1, fvg_htf2, fvg_htf3, fvg_htf4, display_fvg_htf1, display_fvg_htf2, display_fvg_htf3, display_fvg_htf4))
+        if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
             runtime.error("""While FVG Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
             higher timeframes chosen.""")
-            
-        if display_fvg_htf1
+
+        array<string> selected_tfs = array.new<string>()
+        
+        if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
+            selected_tfs.unshift(htf1)
             var array<fvg> bull_fvgs_1 = array.new<fvg>()
             var array<fvg> bear_fvgs_1 = array.new<fvg>()
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf1, [detect_fvg(), close[1], high, low])
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, [detect_fvg(), close[1], high, low])
             if not na(FVG)
                 plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
 
@@ -353,11 +349,12 @@ if display_fvgs
             if bear_fvgs_1.size() > 0
                 update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
             
-        if display_fvg_htf2
+        if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
+            selected_tfs.unshift(htf2)
             var array<fvg> bull_fvgs_2 = array.new<fvg>()
             var array<fvg> bear_fvgs_2 = array.new<fvg>()
 
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf2, [detect_fvg(), close[1], high, low])
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, [detect_fvg(), close[1], high, low])
             if not na(FVG)
                 plot_fvg(FVG, bull_fvgs_2, bear_fvgs_2)
 
@@ -367,11 +364,12 @@ if display_fvgs
             if bear_fvgs_2.size() > 0
                 update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
 
-        if display_fvg_htf3
+        if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
+            selected_tfs.unshift(htf3)
             var array<fvg> bull_fvgs_3 = array.new<fvg>()
             var array<fvg> bear_fvgs_3 = array.new<fvg>()
 
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf3, [detect_fvg(), close[1], high, low])
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, [detect_fvg(), close[1], high, low])
             if not na(FVG)
                 plot_fvg(FVG, bull_fvgs_3, bear_fvgs_3)
 
@@ -381,11 +379,12 @@ if display_fvgs
             if bear_fvgs_3.size() > 0
                 update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
 
-        if display_fvg_htf4
+        if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
+            selected_tfs.unshift(htf4)
             var array<fvg> bull_fvgs_4 = array.new<fvg>()
             var array<fvg> bear_fvgs_4 = array.new<fvg>()
 
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, fvg_htf4, [detect_fvg(), close[1], high, low])
+            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, [detect_fvg(), close[1], high, low])
             if not na(FVG)
                 plot_fvg(FVG, bull_fvgs_4, bear_fvgs_4)
 
@@ -428,17 +427,17 @@ if display_OBs
 //current colors are placeholders; add settings for colors later as well
 // Order blocks must be the lowest of x candles, create a gap, and
 // lead to a break of structure
-//Order block box of (3h+l/4 and 3l+h/4) or just hl2
+
 //add setting for fvgs to only be made from candle during market hours
-//could turn closed_idxs loop into a separate garbage collector func
 // using 'time' variable makes FVGs from overnight get plotted a little off,
 // don't know if there is a fix fr
-
-//more complex logic for multi-tf display conditions
 
 // should i initialize the multiple arrays or fvg_arrays with a wrapper and
 // loop through them instead of 4 conditional blocks
 // with this i could target lower tf
+// ^ do this after multi OBs ^ easier logic for skipping non selected htfs
 
-//centralized htf choices or liquidity zone specific
-// separate generalized mutli tf runtime error into each of the 4
+//possible functionality to close htf fvg based on a different tf
+// for example 1d bearish would be removed from 4hr candle closing above it
+
+//i wish i could know what tf a fvg is from
