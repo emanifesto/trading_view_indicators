@@ -3,8 +3,6 @@
 
 //@version=6
 indicator("The Method", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
-// import TradingView/ta/12
-// ^ where did this come from?
 
 // SETTINGS
 // All customizability and inputs that this indicator will use
@@ -23,9 +21,9 @@ bool display_htf4 = input.bool(true, "", group="HTF", inline="htf_set2")
 
 //Group - Fair Value Gap (FVG)
 bool display_fvgs = input.bool(true, "Display FVGs", group="FVG", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
-float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, group='FVG', display=display.none,
+float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, step=0.05, group='FVG', display=display.none,
 tooltip="Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.")
-float fvg_max_size = input.float(2, "Maximum FVG Size", minval=0, group='FVG', display=display.none,
+float fvg_max_size = input.float(2, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
 tooltip="Determines the maximum size that a FVG can be. Can be used to prevent very large FVGs that span the chart.")
 bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", group='FVG',
 tooltip="Determines if Fair Value Gaps are pulled from multiple timeframes and displayed in an overlay.")
@@ -33,6 +31,13 @@ tooltip="Determines if Fair Value Gaps are pulled from multiple timeframes and d
 //Group - Order Block (OB)
 bool display_OBs = input.bool(true, "Display OBs", group="OB", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
 string ob_size = input.string("Full", "OB Size", ["Small", "Medium", "Full"], "Used to adjust the size and calcuation of an Order Block.", group="OB", display=display.none)
+int ob_pivot_length = input.int(7, "Pivot Length", minval=2, 
+tooltip="""
+Determines how many candles back to look when confirming a high or low to build an Order Block from. A higher value will result in more selectiveness and less OBs found, for a lower value the opposite is true. Recommended range is between 5 and 15.
+""", group="OB", display=display.none)
+float ob_rsi_threshold = input.float(5.5, "RSI Threshold", minval=2, maxval=20, step=0.5, 
+tooltip="""Order Blocks are detected from large swings in the RSI close of previous candles. This value represents how large of a swing is necessary to produce an Order Block. A higher value is more selective. Recommended range between 5 and 8.
+""", group="OB", display=display.none)
 
 
 // TYPES
@@ -156,8 +161,7 @@ plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) =>
     chart.point bottom = chart.point.from_time(start, FVG.bottom)
     chart.point midpoint1 = chart.point.from_time(start, FVG.middle)
     chart.point midpoint2 = chart.point.from_time(timenow, FVG.middle)
-    // timenow because of weird bug that makes the line horizontal
-    // regardless of the x1 and x2 being different
+
     if FVG.direction == sentiment.BULL and (bull_arr.size() == 0 or (bull_arr.size() != 0 and FVG.id != bull_arr.get(0).id))
         FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend=extend.right, xloc=xloc.bar_time)
         FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.blue, extend=extend.right)
@@ -182,10 +186,8 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
-            // box.set_extend(bx, extend.none)
             box.set_bgcolor(bx, color.new(color.silver, 50))
             line.set_x2(ln, time + 1)
-            // line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.bottom)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.bottom)
@@ -211,10 +213,8 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
-            // box.set_extend(bx, extend.none)
             box.set_bgcolor(bx, color.new(color.silver, 50))
             line.set_x2(ln, time + 1)
-            // line.set_extend(ln, extend.none)
             line.set_color(ln, color.black)
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.top)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.top)
@@ -233,7 +233,7 @@ detect_ob() =>
     float bull_pivot = ta.lowest(low[1], 2)
     float bear_pivot = ta.highest(high[1], 2)
 
-    if bull_pivot - ta.lowest(low[1], 7) < 0.15 and trigger > 5.5
+    if bull_pivot == ta.lowest(low[1], ob_pivot_length) and trigger >= ob_rsi_threshold
         chart.point y = chart.point.from_time(time - timeframe.in_seconds() * 1000, bull_pivot)
         chart.point x = na
         if ob_size == "Full"
@@ -246,7 +246,7 @@ detect_ob() =>
         string id = str.format("{0}-{1}", x.price, y.price)
         OB := ob.new(id, x, y, sentiment.BULL, status.OPEN, 0)
 
-    if bear_pivot - ta.highest(high[1], 7) > -0.15 and trigger < -5.5
+    if bear_pivot == ta.highest(high[1], ob_pivot_length) and trigger <= -ob_rsi_threshold
         chart.point x = chart.point.from_time(time - timeframe.in_seconds() * 1000, bear_pivot)
         chart.point y = na
 
@@ -425,8 +425,6 @@ if display_OBs
     
 
 //current colors are placeholders; add settings for colors later as well
-// Order blocks must be the lowest of x candles, create a gap, and
-// lead to a break of structure
 
 //add setting for fvgs to only be made from candle during market hours
 // using 'time' variable makes FVGs from overnight get plotted a little off,
@@ -441,3 +439,4 @@ if display_OBs
 // for example 1d bearish would be removed from 4hr candle closing above it
 
 //i wish i could know what tf a fvg is from
+//display error message to make it easier to tell when tf is bad instead of just runtime.error
