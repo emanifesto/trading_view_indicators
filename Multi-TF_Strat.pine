@@ -7,6 +7,9 @@ indicator("The Method", overlay = true, calc_bars_count = 0, max_boxes_count = 5
 // SETTINGS
 // All customizability and inputs that this indicator will use
 
+// int da_month = input.int(8, "Lookback Month", minval=1, maxval=12)
+// int da_day = input.int(1, "Lookback Day", minval=1, maxval=31)
+
 //Group - Higher Time Frame (HTF)
 string htf1 = input.timeframe("", "HTF 1", group="HTF", inline="htf_set1", display=display.none)
 bool display_htf1 = input.bool(true, "", group="HTF", inline="htf_set1")
@@ -21,21 +24,23 @@ bool display_htf4 = input.bool(true, "", group="HTF", inline="htf_set2")
 
 //Group - Fair Value Gap (FVG)
 bool display_fvgs = input.bool(true, "Display FVGs", group="FVG", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
+bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", group='FVG',
+tooltip="Determines if Fair Value Gaps are displayed from the multiple timeframes selected or from the current chart timeframe.")
 float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, step=0.05, group='FVG', display=display.none,
 tooltip="Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.")
-float fvg_max_size = input.float(2, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
+float fvg_max_size = input.float(5, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
 tooltip="Determines the maximum size that a FVG can be. Can be used to prevent very large FVGs that span the chart.")
-bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", group='FVG',
-tooltip="Determines if Fair Value Gaps are pulled from multiple timeframes and displayed in an overlay.")
 
 //Group - Order Block (OB)
-bool display_OBs = input.bool(true, "Display OBs", group="OB", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
+bool display_OBs = input.bool(true, "Display OBs", group="OB", tooltip="Master toggle for turning on or off the display of Order Blocks.")
+bool ob_multiTF = input.bool(true, "OB Multi TimeFrame Display Toggle", group='OB',
+tooltip="Determines if Order Blocks are displayed from the multiple timeframes selected or from the current chart timeframe.")
 string ob_size = input.string("Full", "OB Size", ["Small", "Medium", "Full"], "Used to adjust the size and calcuation of an Order Block.", group="OB", display=display.none)
 int ob_pivot_length = input.int(7, "Pivot Length", minval=2, 
 tooltip="""
 Determines how many candles back to look when confirming a high or low to build an Order Block from. A higher value will result in more selectiveness and less OBs found, for a lower value the opposite is true. Recommended range is between 5 and 15.
 """, group="OB", display=display.none)
-float ob_rsi_threshold = input.float(5.5, "RSI Threshold", minval=2, maxval=20, step=0.5, 
+float ob_rsi_threshold = input.float(7, "RSI Threshold", minval=2, maxval=20, step=0.5, 
 tooltip="""Order Blocks are detected from large swings in the RSI close of previous candles. This value represents how large of a swing is necessary to produce an Order Block. A higher value is more selective. Recommended range between 5 and 8.
 """, group="OB", display=display.none)
 
@@ -89,7 +94,6 @@ type fvg
 //@field start  Stores the chart time that an OB starts from.
 //@field direction  Stores an enumeration value for the sentiment of bullish or bearish.
 //@field state  Stores an enumeration value for whether the OB is open, mitigated, or closed.
-//@field mitigation_count  Stores the number of candles that have interacted with an OB. OB will be invalidated after a specified amount. This variable resets to 0 after price moves away from an OB.
 //@field display  Stores the box object that is displayed on the chart.
 type ob
     string id
@@ -97,7 +101,6 @@ type ob
     chart.point bottom
     sentiment direction
     status state
-    int mitigation_count
     box display
 
 
@@ -139,8 +142,8 @@ detect_fvg() =>
         int start = time - (timeframe.in_seconds() * 1000 * 2)
         float top = low[1]
         float bottom = high[3]
-        float middle = math.avg(top, bottom)
-        string id = str.format("{0}-{1}", top, bottom)
+        float middle = (math.avg(top, bottom))
+        string id = str.tostring(top) + '-' + str.tostring(bottom)
 
         FVG := fvg.new(id, top, bottom, middle, start, sentiment.BULL, status.OPEN)
 
@@ -149,7 +152,7 @@ detect_fvg() =>
         float top = low[3]
         float bottom = high[1]
         float middle = math.avg(top, bottom)
-        string id = str.format("{0}-{1}", top, bottom)
+        string id = str.tostring(top) + '-' + str.tostring(bottom)
 
         FVG := fvg.new(id, top, bottom, middle, start, sentiment.BEAR, status.OPEN)
 
@@ -226,6 +229,20 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
     
     garbage_collect(closed_idxs, bear_arr)
 
+load_chart_fvgs() => 
+    var array<fvg> bull_fvgs = array.new<fvg>()
+    var array<fvg> bear_fvgs = array.new<fvg>()
+
+    fvg FVG = detect_fvg()
+    if not na(FVG)
+        plot_fvg(FVG, bull_fvgs, bear_fvgs)
+
+    if bull_fvgs.size() > 0
+        update_bullish_fvgs(bull_fvgs, close[1])
+
+    if bear_fvgs.size() > 0
+        update_bearish_fvgs(bear_fvgs, close[1])
+
 detect_ob() =>
     ob OB = na
     
@@ -244,7 +261,7 @@ detect_ob() =>
             x := low[1] < low[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, (hl2[1] + low[1]) / 2) : chart.point.from_time(time - timeframe.in_seconds() * 2000, (hl2[2] + low[2]) / 2)
         
         string id = str.format("{0}-{1}", x.price, y.price)
-        OB := ob.new(id, x, y, sentiment.BULL, status.OPEN, 0)
+        OB := ob.new(id, x, y, sentiment.BULL, status.OPEN)
 
     if bear_pivot == ta.highest(high[1], ob_pivot_length) and trigger <= -ob_rsi_threshold
         chart.point x = chart.point.from_time(time - timeframe.in_seconds() * 1000, bear_pivot)
@@ -258,16 +275,16 @@ detect_ob() =>
             y := high[1] > high[2] ? chart.point.from_time(time - timeframe.in_seconds() * 1000, (hl2[1] + high[1]) / 2) : chart.point.from_time(time - timeframe.in_seconds() * 2000, (hl2[2] + high[2]) / 2)
         
         string id = str.format("{0}-{1}", x.price, y.price)
-        OB := ob.new(id, x, y, sentiment.BEAR, status.OPEN, 0)
+        OB := ob.new(id, x, y, sentiment.BEAR, status.OPEN)
     
     OB
 
 plot_ob(ob OB, array<ob> bull_arr, array<ob> bear_arr) =>
     if OB.direction == sentiment.BULL  and (bull_arr.size() == 0 or (bull_arr.size() != 0 and OB.id != bull_arr.get(0).id))
-        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.lime, 80), xloc = xloc.bar_time)
+        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.lime, 80), xloc = xloc.bar_time, border_color=color.lime)
         bull_arr.unshift(OB)
     else if OB.direction == sentiment.BEAR  and (bear_arr.size() == 0 or (bear_arr.size() != 0 and OB.id != bear_arr.get(0).id))
-        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.red, 80), xloc = xloc.bar_time)
+        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.red, 80), xloc = xloc.bar_time, border_color=color.red)
         bear_arr.unshift(OB)
     
 update_bullish_obs(array<ob> bull_arr, float htf_close = close, float htf_low = low) =>
@@ -327,6 +344,7 @@ update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high =
 
 
 // Fair Value Gaps
+// if time < timestamp(2026, da_month, da_day + 1)
 if display_fvgs
     if fvg_multiTF
         if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
@@ -337,90 +355,156 @@ if display_fvgs
         
         if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
             selected_tfs.unshift(htf1)
-            var array<fvg> bull_fvgs_1 = array.new<fvg>()
-            var array<fvg> bear_fvgs_1 = array.new<fvg>()
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, [detect_fvg(), close[1], high, low])
-            if not na(FVG)
-                plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
 
-            if bull_fvgs_1.size() > 0
-                update_bullish_fvgs(bull_fvgs_1, htf_close, htf_low)
+            if na(htf1) or htf1 == timeframe.main_period
+                load_chart_fvgs()
+            else
+                var array<fvg> bull_fvgs_1 = array.new<fvg>()
+                var array<fvg> bear_fvgs_1 = array.new<fvg>()
+                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, [detect_fvg(), close[1], high, low])
+                if not na(FVG)
+                    plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
 
-            if bear_fvgs_1.size() > 0
-                update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
+                if bull_fvgs_1.size() > 0
+                    update_bullish_fvgs(bull_fvgs_1, htf_close, htf_low)
+
+                if bear_fvgs_1.size() > 0
+                    update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
             
         if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
             selected_tfs.unshift(htf2)
-            var array<fvg> bull_fvgs_2 = array.new<fvg>()
-            var array<fvg> bear_fvgs_2 = array.new<fvg>()
 
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, [detect_fvg(), close[1], high, low])
-            if not na(FVG)
-                plot_fvg(FVG, bull_fvgs_2, bear_fvgs_2)
+            if na(htf2) or htf2 == timeframe.main_period
+                load_chart_fvgs()
+            else
+                var array<fvg> bull_fvgs_2 = array.new<fvg>()
+                var array<fvg> bear_fvgs_2 = array.new<fvg>()
 
-            if bull_fvgs_2.size() > 0
-                update_bullish_fvgs(bull_fvgs_2, htf_close, htf_low)
+                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, [detect_fvg(), close[1], high, low])
+                if not na(FVG)
+                    plot_fvg(FVG, bull_fvgs_2, bear_fvgs_2)
 
-            if bear_fvgs_2.size() > 0
-                update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
+                if bull_fvgs_2.size() > 0
+                    update_bullish_fvgs(bull_fvgs_2, htf_close, htf_low)
+
+                if bear_fvgs_2.size() > 0
+                    update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
 
         if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
             selected_tfs.unshift(htf3)
-            var array<fvg> bull_fvgs_3 = array.new<fvg>()
-            var array<fvg> bear_fvgs_3 = array.new<fvg>()
 
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, [detect_fvg(), close[1], high, low])
-            if not na(FVG)
-                plot_fvg(FVG, bull_fvgs_3, bear_fvgs_3)
+            if na(htf3) or htf3 == timeframe.main_period
+                load_chart_fvgs()
+            else
+                var array<fvg> bull_fvgs_3 = array.new<fvg>()
+                var array<fvg> bear_fvgs_3 = array.new<fvg>()
 
-            if bull_fvgs_3.size() > 0
-                update_bullish_fvgs(bull_fvgs_3, htf_close, htf_low)
+                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, [detect_fvg(), close[1], high, low])
+                if not na(FVG)
+                    plot_fvg(FVG, bull_fvgs_3, bear_fvgs_3)
 
-            if bear_fvgs_3.size() > 0
-                update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
+                if bull_fvgs_3.size() > 0
+                    update_bullish_fvgs(bull_fvgs_3, htf_close, htf_low)
+
+                if bear_fvgs_3.size() > 0
+                    update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
 
         if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
             selected_tfs.unshift(htf4)
-            var array<fvg> bull_fvgs_4 = array.new<fvg>()
-            var array<fvg> bear_fvgs_4 = array.new<fvg>()
 
-            [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, [detect_fvg(), close[1], high, low])
-            if not na(FVG)
-                plot_fvg(FVG, bull_fvgs_4, bear_fvgs_4)
+            if na(htf4) or htf4 == timeframe.main_period
+                load_chart_fvgs()
+            else
+                var array<fvg> bull_fvgs_4 = array.new<fvg>()
+                var array<fvg> bear_fvgs_4 = array.new<fvg>()
 
-            if bull_fvgs_4.size() > 0
-                update_bullish_fvgs(bull_fvgs_4, htf_close, htf_low)
+                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, [detect_fvg(), close[1], high, low])
+                if not na(FVG)
+                    plot_fvg(FVG, bull_fvgs_4, bear_fvgs_4)
 
-            if bear_fvgs_4.size() > 0
-                update_bearish_fvgs(bear_fvgs_4, htf_close, htf_high)
+                if bull_fvgs_4.size() > 0
+                    update_bullish_fvgs(bull_fvgs_4, htf_close, htf_low)
 
+                if bear_fvgs_4.size() > 0
+                    update_bearish_fvgs(bear_fvgs_4, htf_close, htf_high)
     else
-        var array<fvg> bull_fvgs = array.new<fvg>()
-        var array<fvg> bear_fvgs = array.new<fvg>()
-
-        fvg FVG = detect_fvg()
-        if not na(FVG)
-            plot_fvg(FVG, bull_fvgs, bear_fvgs)
-
-        if bull_fvgs.size() > 0
-            update_bullish_fvgs(bull_fvgs, close[1])
-
-        if bear_fvgs.size() > 0
-            update_bearish_fvgs(bear_fvgs, close[1])
+        load_chart_fvgs()
 
 
 // Order Block
 if display_OBs
+    if ob_multiTF
+        if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
+            runtime.error("""While OB Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
+            higher timeframes chosen.""")
 
-    var array<ob> bull_obs = array.new<ob>()
-    var array<ob> bear_obs = array.new<ob>()
-    ob OB = detect_ob()
-    if not na(OB)
-        plot_ob(OB, bull_obs, bear_obs)
-    if bull_obs.size() > 0
-        update_bullish_obs(bull_obs, close, low)
-    if bear_obs.size() > 0
-        update_bearish_obs(bear_obs, close, high)
+        array<string> selected_tfs = array.new<string>()
+        
+        if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
+            selected_tfs.unshift(htf1)
+            var array<ob> bull_obs_1 = array.new<ob>()
+            var array<ob> bear_obs_1 = array.new<ob>()
+            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, [detect_ob(), close, high, low])
+            if not na(OB)
+                plot_ob(OB, bull_obs_1, bear_obs_1)
+
+            if bull_obs_1.size() > 0
+                update_bullish_obs(bull_obs_1, htf_close, htf_low)
+
+            if bear_obs_1.size() > 0
+                update_bearish_obs(bear_obs_1, htf_close, htf_high)
+
+        if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
+            selected_tfs.unshift(htf2)
+            var array<ob> bull_obs_2 = array.new<ob>()
+            var array<ob> bear_obs_2 = array.new<ob>()
+            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, [detect_ob(), close, high, low])
+            if not na(OB)
+                plot_ob(OB, bull_obs_2, bear_obs_2)
+
+            if bull_obs_2.size() > 0
+                update_bullish_obs(bull_obs_2, htf_close, htf_low)
+
+            if bear_obs_2.size() > 0
+                update_bearish_obs(bear_obs_2, htf_close, htf_high)
+
+        if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
+            selected_tfs.unshift(htf3)
+            var array<ob> bull_obs_3 = array.new<ob>()
+            var array<ob> bear_obs_3 = array.new<ob>()
+            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, [detect_ob(), close, high, low])
+            if not na(OB)
+                plot_ob(OB, bull_obs_3, bear_obs_3)
+
+            if bull_obs_3.size() > 0
+                update_bullish_obs(bull_obs_3, htf_close, htf_low)
+
+            if bear_obs_3.size() > 0
+                update_bearish_obs(bear_obs_3, htf_close, htf_high)
+        
+        if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
+            selected_tfs.unshift(htf4)
+            var array<ob> bull_obs_4 = array.new<ob>()
+            var array<ob> bear_obs_4 = array.new<ob>()
+            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, [detect_ob(), close, high, low])
+            if not na(OB)
+                plot_ob(OB, bull_obs_4, bear_obs_4)
+
+            if bull_obs_4.size() > 0
+                update_bullish_obs(bull_obs_4, htf_close, htf_low)
+
+            if bear_obs_4.size() > 0
+                update_bearish_obs(bear_obs_4, htf_close, htf_high)
+    else
+        var array<ob> bull_obs = array.new<ob>()
+        var array<ob> bear_obs = array.new<ob>()
+        ob OB = detect_ob()
+        if not na(OB)
+            plot_ob(OB, bull_obs, bear_obs)
+        if bull_obs.size() > 0
+            update_bullish_obs(bull_obs, close, low)
+        if bear_obs.size() > 0
+            update_bearish_obs(bear_obs, close, high)
 
     
 
@@ -440,3 +524,5 @@ if display_OBs
 
 //i wish i could know what tf a fvg is from
 //display error message to make it easier to tell when tf is bad instead of just runtime.error
+
+//does same if na(htf) of htf==timeframe check need to be done for OBs?
