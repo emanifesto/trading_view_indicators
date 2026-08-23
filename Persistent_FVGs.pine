@@ -2,16 +2,16 @@
 // © DamiSneeze
 
 //@version=6
-indicator("Persistent FVGs - Dami", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
+indicator("Persistent FVGs - Dami", overlay = true)
 
 // SETTINGS
 // All customizability and inputs that this indicator will use
 
-int max_displays = input.int(7, "Max Display Count Each", minval=0, maxval=500, group='FVG', display=display.none,
-tooltip='Determines the max amount of Fair Value Gaps displayed on the chart. If the number is 10, a maximum of 10 bullish and 10 bearish can be shown at one time, numbering 20 in total.')
+int max_displays = input.int(5, "Max Display Count Each", minval=3, maxval=250, group='FVG', display=display.none,
+tooltip='Determines the max amount of Fair Value Gaps displayed on the chart. If the number is 10, a maximum of 10 bullish and 10 bearish can be shown at one time, numbering 20 in total. Min input is 3, max input is 500.')
 float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, step=0.05, group='FVG', display=display.none,
 tooltip="Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.")
-float fvg_max_size = input.float(5, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
+float fvg_max_size = input.float(10, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
 tooltip="Determines the maximum size that a FVG can be. Can be used to prevent very large FVGs that span the chart.")
 color fvg_bull_box_color = input.color(color.new(color.lime, 80), "Bullish Box/Line Color", inline="bull", group="FVG")
 color fvg_bull_line_color = input.color(color.lime, "", inline="bull", group="FVG", tooltip="Customizable background color and line color of bullish Fair Value Gaps.")
