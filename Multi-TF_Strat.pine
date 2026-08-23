@@ -427,8 +427,6 @@ if display_fvgs
         bull_fvg_opened := bull_fvg_o
         bear_fvg_opened := bear_fvg_o
         new_fvg_opened := bull_fvg_opened or bear_fvg_opened
-        new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
-        new_fvg_closed := bull_fvg_closed or bear_fvg_closed
 
         if not na(FVG)
             plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
