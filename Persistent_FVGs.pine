@@ -1,0 +1,269 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © DamiSneeze
+
+//@version=6
+indicator("Persistent FVGs - Dami", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
+
+// SETTINGS
+// All customizability and inputs that this indicator will use
+
+int max_displays = input.int(7, "Max Display Count Each", minval=0, maxval=500, group='FVG', display=display.none,
+tooltip='Determines the max amount of Fair Value Gaps displayed on the chart. If the number is 10, a maximum of 10 bullish and 10 bearish can be shown at one time, numbering 20 in total.')
+float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, step=0.05, group='FVG', display=display.none,
+tooltip="Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.")
+float fvg_max_size = input.float(5, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
+tooltip="Determines the maximum size that a FVG can be. Can be used to prevent very large FVGs that span the chart.")
+color fvg_bull_box_color = input.color(color.new(color.lime, 80), "Bullish Box/Line Color", inline="bull", group="FVG")
+color fvg_bull_line_color = input.color(color.lime, "", inline="bull", group="FVG", tooltip="Customizable background color and line color of bullish Fair Value Gaps.")
+color fvg_bear_box_color = input.color(color.new(color.red, 80), "Bearish Box/Line Color", inline="bear", group="FVG")
+color fvg_bear_line_color = input.color(color.red, "", inline="bear", group="FVG", tooltip="Customizable background color and line color of bearish Fair Value Gaps.")
+color fvg_mitigated_box_color = input.color(color.new(color.silver, 70), "Mitigated Box/Line Color", inline="mitigated", group="FVG")
+color fvg_mitigated_line_color = input.color(color.black, "", inline="mitigated", group="FVG", tooltip="The background and midline colors of Fair Value Gaps after price has traded past the midline.")
+
+
+// TYPES
+// All types and enums used to store/display information
+
+//@enum An enumeration of the bullish or bearish sentiment of a FVG
+//@field BULL  Specifies a bullish FVG where buyers are likely to step in.
+//@field BEAR  Specifies a bearish FVG where sellers are likely to make a move.
+enum sentiment
+    BULL
+    BEAR
+    
+//@enum An enumeration of the status of a FVG
+//@field OPEN   Specifies a FVG that price has not been tested.
+//@field MITIGATED   Specifies a FVG that price has gone past the midline.
+enum status
+    OPEN
+    MITIGATED
+
+//@type A custom object that holds information on a Fair Value Gap.
+//@field id A unique identifier to avoid plotting the same FVG multiple times.
+//@field top  Stores the top price of the FVG. The point price must close beyond to invalidate a bearish FVG.
+//@field bottom  Stores the bottom price of the FVG. The point price must close beyond to invalidate a bullish FVG.
+//@field middle  Stores the middle price of the FVG.
+//@field start  Stores the chart time that a FVG starts from.
+//@field direction  Stores an enumeration value for the sentiment of bullish or bearish.
+//@field state  Stores an enumeration value for whether the FVG is open, mitigated, or closed.
+//@field display  Stores the box object that is displayed on the chart.
+//@field midline  Stores the line object that displays the middle of the FVG.
+//@field bounce_line  Stores a line object representing where price must close beyond in order to invalidate a FVG. Only appears when fvg.state == status.MITIGATED. 
+type fvg
+    string id
+    float top
+    float bottom
+    float middle
+    int start
+    sentiment direction
+    status state
+    box display
+    line midline
+    line bounce_line
+
+
+//FUNCTIONS
+// Reusable code that will be called on throughout runtime
+
+
+//@function This function checks the last bar (low[1]/high[1]) and
+// the bar from three candles ago (low[3]/high[3]); creating
+// a FVG object after it identifies whether a gap exists
+// between them.
+detect_fvg() =>
+    fvg FVG = na
+    bool bull_fvg_o = false
+    bool bear_fvg_o = false
+
+    if high[3] < low[1] and (low[1] - high[3] > fvg_min_size) and (low[1] - high[3] < fvg_max_size)
+        int start = time - (timeframe.in_seconds() * 1000 * 2)
+        float top = low[1]
+        float bottom = high[3]
+        float middle = (math.avg(top, bottom))
+        string id = str.tostring(top) + '-' + str.tostring(bottom)
+
+        FVG := fvg.new(id, top, bottom, middle, start, sentiment.BULL, status.OPEN)
+        bull_fvg_o := true
+
+    else if low[3] > high[1] and (low[3] - high[1] > fvg_min_size) and (low[1] - high[3] < fvg_max_size)
+        int start = time - (timeframe.in_seconds() * 1000 * 2)
+        float top = low[3]
+        float bottom = high[1]
+        float middle = math.avg(top, bottom)
+        string id = str.tostring(top) + '-' + str.tostring(bottom)
+
+        FVG := fvg.new(id, top, bottom, middle, start, sentiment.BEAR, status.OPEN)
+        bear_fvg_o := true
+
+    [FVG, bull_fvg_o, bear_fvg_o]
+
+remove_oldest(array<fvg> arr) => 
+    fvg FVG = arr.pop()
+    box.delete(FVG.display)
+    line.delete(FVG.midline)
+    if not na(FVG.bounce_line)
+        line.delete(FVG.bounce_line)
+
+//@function This function retrieves data from a FVG structure 
+// and constructs the boxes and lines that will be displayed on the chart.
+// Fair Value Gaps are allocated to either a bull or bear array.
+plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) => 
+    int start = FVG.start
+    chart.point top = chart.point.from_time(start, FVG.top)
+    chart.point bottom = chart.point.from_time(timenow, FVG.bottom)
+    chart.point midpoint1 = chart.point.from_time(start, FVG.middle)
+    chart.point midpoint2 = chart.point.from_time(timenow, FVG.middle)
+
+    if FVG.direction == sentiment.BULL and (bull_arr.size() == 0 or (bull_arr.size() != 0 and FVG.id != bull_arr.get(0).id))
+        FVG.display := box.new(top, bottom, border_width=0, bgcolor=fvg_bull_box_color, extend=extend.right, xloc=xloc.bar_time)
+        FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=fvg_bull_line_color, extend=extend.right)
+        bull_arr.unshift(FVG)
+
+        if bull_arr.size() > max_displays
+            remove_oldest(bull_arr)
+
+    else if FVG.direction == sentiment.BEAR and (bear_arr.size() == 0 or (bear_arr.size() != 0 and FVG.id != bear_arr.get(0).id))
+        FVG.display := box.new(top, bottom, border_width=0, bgcolor=fvg_bear_box_color, extend=extend.right, xloc=xloc.bar_time)
+        FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=fvg_bear_line_color, extend=extend.right)
+        bear_arr.unshift(FVG)
+
+        if bear_arr.size() > max_displays
+            remove_oldest(bear_arr)
+
+
+//@function This function loops through the array of bullish
+// fair value gaps to update their display. If price trades below 
+// the midline, the display updates to show it was mitigated. If a candle
+// closes below the bottom, it gets deleted from the chart.
+update_bullish_fvgs(array<fvg> bull_arr) =>
+    array<int> closed_idxs = array.new<int>()
+    bool bull_fvg_m = false
+    bool bull_fvg_c = false
+
+    for [idx, FVG] in bull_arr
+        if close < FVG.bottom
+            bull_fvg_c := true
+            box.delete(FVG.display)
+            line.delete(FVG.midline)
+            if not na(FVG.bounce_line)
+                line.delete(FVG.bounce_line)
+            array.unshift(closed_idxs, idx)
+            continue
+        if low < FVG.middle and FVG.state != status.MITIGATED
+            bull_fvg_m := true
+            box bx = FVG.display
+            line ln = FVG.midline
+            box.set_right(bx, time)
+            box.set_bgcolor(bx, fvg_mitigated_box_color)
+            line.set_x2(ln, time + 1)
+            line.set_color(ln, fvg_mitigated_line_color)
+            chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.bottom)
+            chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.bottom)
+            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=fvg_bull_line_color, width=3)
+            FVG.state := status.MITIGATED
+            continue
+        if low > FVG.middle
+            break
+
+    for idx in closed_idxs
+        array.remove(bull_arr, idx)
+
+    [bull_fvg_m, bull_fvg_c]
+
+//@function This function loops through the array of bearish
+// fair value gaps to update their display. If price trades above 
+// the midline, the display updates to show it was mitigated. If a candle
+// closes above the top, it gets deleted from the chart.
+update_bearish_fvgs(array<fvg> bear_arr) =>
+    array<int> closed_idxs = array.new<int>()
+    bool bear_fvg_m = false
+    bool bear_fvg_c = false
+
+    for [idx, FVG] in bear_arr
+        if close > FVG.top
+            bear_fvg_c := true
+            box.delete(FVG.display)
+            line.delete(FVG.midline)
+            if not na(FVG.bounce_line)
+                line.delete(FVG.bounce_line)
+            array.unshift(closed_idxs, idx)
+            continue
+        if high > FVG.middle and FVG.state != status.MITIGATED
+            bear_fvg_m := true
+            box bx = FVG.display
+            line ln = FVG.midline
+            box.set_right(bx, time)
+            box.set_bgcolor(bx, fvg_mitigated_box_color)
+            line.set_x2(ln, time + 1)
+            line.set_color(ln, fvg_mitigated_line_color)
+            chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.top)
+            chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.top)
+            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=fvg_bear_line_color, width=3)
+            FVG.state := status.MITIGATED
+            continue
+        if high < FVG.middle
+            break
+
+    for idx in closed_idxs
+        array.remove(bear_arr, idx)
+
+    [bear_fvg_m, bear_fvg_c]
+
+
+// RUNTIME
+// Line of logic that is run for every bar execution
+
+
+var bool new_fvg_opened = false
+var bool new_fvg_mitigated = false
+var bool new_fvg_closed = false
+
+var bool bull_fvg_opened = false
+var bool bull_fvg_mitigated = false
+var bool bull_fvg_closed = false
+var bool bear_fvg_opened = false
+var bool bear_fvg_mitigated = false
+var bool bear_fvg_closed = false
+
+var array<fvg> bull_fvgs = array.new<fvg>()
+var array<fvg> bear_fvgs = array.new<fvg>()
+[FVG, bull_fvg_o, bear_fvg_o] = detect_fvg()
+
+bull_fvg_opened := bull_fvg_o
+bear_fvg_opened := bear_fvg_o
+new_fvg_opened := bull_fvg_opened or bear_fvg_opened
+
+if not na(FVG)
+    plot_fvg(FVG, bull_fvgs, bear_fvgs)
+
+if bull_fvgs.size() > 0
+    [bull_fvg_m, bull_fvg_c] = update_bullish_fvgs(bull_fvgs)
+    bull_fvg_mitigated := bull_fvg_m
+    bull_fvg_closed := bull_fvg_c
+else
+    bull_fvg_mitigated := false
+    bull_fvg_closed := false
+
+if bear_fvgs.size() > 0
+    [bear_fvg_m, bear_fvg_c] = update_bearish_fvgs(bear_fvgs)
+    bear_fvg_mitigated := bear_fvg_m
+    bear_fvg_closed := bear_fvg_c
+else
+    bear_fvg_mitigated := false
+    bear_fvg_closed := false
+    
+new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
+new_fvg_closed := bull_fvg_closed or bear_fvg_closed
+
+
+// ALERTS
+alertcondition(new_fvg_opened, "FVG Opened", "New FVG has been plotted!")
+alertcondition(new_fvg_mitigated, "FVG Mitigated", "A FVG has been mitigated!")
+alertcondition(new_fvg_closed, "FVG Closed", "A FVG has been closed!")
+
+alertcondition(bull_fvg_opened, "Bullish FVG Opened", "New Bullish FVG has been plotted!")
+alertcondition(bull_fvg_mitigated, "Bullish FVG Mitigated", "Bullish FVG has been mitigated!")
+alertcondition(bull_fvg_closed, "Bullish FVG Closed", "Bullish FVG has been closed!")
+alertcondition(bear_fvg_opened, "Bearish FVG Opened", "New Bearish FVG has been plotted!")
+alertcondition(bear_fvg_mitigated, "Bearish FVG Mitigated", "Bearish FVG has been mitigated!")
+alertcondition(bear_fvg_closed, "Bearish FVG Closed", "Bearish FVG has been closed!")
