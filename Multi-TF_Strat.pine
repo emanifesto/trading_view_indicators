@@ -2,13 +2,11 @@
 // © DamiSneeze
 
 //@version=6
-indicator("The Method", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
+indicator("Multi-HTF Key Levels", overlay = true, calc_bars_count = 0, max_boxes_count = 500, max_lines_count = 500)
 
 // SETTINGS
 // All customizability and inputs that this indicator will use
 
-// int da_month = input.int(8, "Lookback Month", minval=1, maxval=12)
-// int da_day = input.int(1, "Lookback Day", minval=1, maxval=31)
 
 //Group - Higher Time Frame (HTF)
 string htf1 = input.timeframe("", "HTF 1", group="HTF", inline="htf_set1", display=display.none)
@@ -24,18 +22,19 @@ bool display_htf4 = input.bool(true, "", group="HTF", inline="htf_set2")
 
 //Group - Fair Value Gap (FVG)
 bool display_fvgs = input.bool(true, "Display FVGs", group="FVG", tooltip="Master toggle for turning on or off the display of Fair Value Gaps.")
-bool fvg_multiTF = input.bool(true, "FVG Multi TimeFrame Display Toggle", group='FVG',
-tooltip="Determines if Fair Value Gaps are displayed from the multiple timeframes selected or from the current chart timeframe.")
 float fvg_min_size = input.float(0.15, "Minimum FVG Size", minval=0, step=0.05, group='FVG', display=display.none,
 tooltip="Determines the minimum size that a FVG can be. Can be used to prevent very small FVGs that are indistinguisable from a line.")
 float fvg_max_size = input.float(5, "Maximum FVG Size", minval=0, step=0.5, group='FVG', display=display.none,
 tooltip="Determines the maximum size that a FVG can be. Can be used to prevent very large FVGs that span the chart.")
+color fvg_bull_box_color = input.color(color.new(color.lime, 80), "Bullish Box/Line Color", inline="bull", group="FVG")
+color fvg_bull_line_color = input.color(color.lime, "", inline="bull", group="FVG", tooltip="Customizable background color and line color of bullish Fair Value Gaps.")
+color fvg_bear_box_color = input.color(color.new(color.red, 80), "Bearish Box/Line Color", inline="bear", group="FVG")
+color fvg_bear_line_color = input.color(color.red, "", inline="bear", group="FVG", tooltip="Customizable background color and line color of bearish Fair Value Gaps.")
+color fvg_mitigated_box_color = input.color(color.new(color.silver, 50), "Mitigated Box/Line Color", inline="mitigated", group="FVG")
+color fvg_mitigated_line_color = input.color(color.black, "", inline="mitigated", group="FVG", tooltip="The background and midline colors of Fair Value Gaps after price has traded past the midline.")
 
 //Group - Order Block (OB)
 bool display_OBs = input.bool(true, "Display OBs", group="OB", tooltip="Master toggle for turning on or off the display of Order Blocks.")
-bool ob_multiTF = input.bool(true, "OB Multi TimeFrame Display Toggle", group='OB',
-tooltip="Determines if Order Blocks are displayed from the multiple timeframes selected or from the current chart timeframe.")
-string ob_size = input.string("Full", "OB Size", ["Small", "Medium", "Full"], "Used to adjust the size and calcuation of an Order Block.", group="OB", display=display.none)
 int ob_pivot_length = input.int(7, "Pivot Length", minval=2, 
 tooltip="""
 Determines how many candles back to look when confirming a high or low to build an Order Block from. A higher value will result in more selectiveness and less OBs found, for a lower value the opposite is true. Recommended range is between 5 and 15.
@@ -43,6 +42,13 @@ Determines how many candles back to look when confirming a high or low to build 
 float ob_rsi_threshold = input.float(7, "RSI Threshold", minval=2, maxval=20, step=0.5, 
 tooltip="""Order Blocks are detected from large swings in the RSI close of previous candles. This value represents how large of a swing is necessary to produce an Order Block. A higher value is more selective. Recommended range between 5 and 8.
 """, group="OB", display=display.none)
+string ob_size = input.string("Full", "OB Size", ["Small", "Medium", "Full"], "Used to adjust the size and calcuation of an Order Block.", group="OB", display=display.none)
+color ob_bull_box_color = input.color(color.new(color.yellow, 80), "Bullish Box/Border/Mitigated Color", inline="bull", group="OB")
+color ob_bull_border_color = input.color(color.yellow, "", inline="bull", group="OB")
+color ob_bull_mitigated_color = input.color(color.new(color.yellow, 85), "", inline="bull", group="OB", tooltip="Customizable colors for bullish Order Blocks: Default background color, border color, and background color while prices trades within the range.")
+color ob_bear_box_color = input.color(color.new(color.purple, 80), "Bearish Box/Border/Mitigated Color", inline="bear", group="OB")
+color ob_bear_border_color = input.color(color.purple, "", inline="bear", group="OB")
+color ob_bear_mitigated_color = input.color(color.new(color.purple, 85), "", inline="bear", group="OB", tooltip="Customizable colors for bearish Order Blocks: Default background color, border color, and background color while prices trades within the range.")
 
 
 // TYPES
@@ -55,7 +61,7 @@ tooltip="""Order Blocks are detected from large swings in the RSI close of previ
 enum sentiment
     BULL
     BEAR
-
+    
 //@enum An enumeration of the status of zones of liquidity that price can react off of. (FVGs, Liquidity Pools, etc.)
 //@field OPEN   Specifies a zone that price has not disrespected.
 //@field MITIGATED   Specifies a zone that price has gone more than 50% through.
@@ -138,6 +144,9 @@ garbage_collect(array<int> idxs, arr) =>
 // between them.
 detect_fvg() =>
     fvg FVG = na
+    bool bull_fvg_o = false
+    bool bear_fvg_o = false
+
     if high[3] < low[1] and (low[1] - high[3] > fvg_min_size) and (low[1] - high[3] < fvg_max_size)
         int start = time - (timeframe.in_seconds() * 1000 * 2)
         float top = low[1]
@@ -146,6 +155,7 @@ detect_fvg() =>
         string id = str.tostring(top) + '-' + str.tostring(bottom)
 
         FVG := fvg.new(id, top, bottom, middle, start, sentiment.BULL, status.OPEN)
+        bull_fvg_o := true
 
     else if low[3] > high[1] and (low[3] - high[1] > fvg_min_size) and (low[1] - high[3] < fvg_max_size)
         int start = time - (timeframe.in_seconds() * 1000 * 2)
@@ -155,30 +165,35 @@ detect_fvg() =>
         string id = str.tostring(top) + '-' + str.tostring(bottom)
 
         FVG := fvg.new(id, top, bottom, middle, start, sentiment.BEAR, status.OPEN)
+        bear_fvg_o := true
 
-    FVG
+    [FVG, bull_fvg_o, bear_fvg_o, close[1], high, low]
 
 plot_fvg(fvg FVG, array<fvg> bull_arr, array<fvg> bear_arr) => 
     int start = FVG.start
     chart.point top = chart.point.from_time(start, FVG.top)
-    chart.point bottom = chart.point.from_time(start, FVG.bottom)
+    chart.point bottom = chart.point.from_time(timenow, FVG.bottom)
     chart.point midpoint1 = chart.point.from_time(start, FVG.middle)
     chart.point midpoint2 = chart.point.from_time(timenow, FVG.middle)
 
     if FVG.direction == sentiment.BULL and (bull_arr.size() == 0 or (bull_arr.size() != 0 and FVG.id != bull_arr.get(0).id))
-        FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.blue, 85), extend=extend.right, xloc=xloc.bar_time)
-        FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.blue, extend=extend.right)
+        FVG.display := box.new(top, bottom, border_width=0, bgcolor=fvg_bull_box_color, extend=extend.right, xloc=xloc.bar_time)
+        FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=fvg_bull_line_color, extend=extend.right)
         bull_arr.unshift(FVG)
 
     else if FVG.direction == sentiment.BEAR and (bear_arr.size() == 0 or (bear_arr.size() != 0 and FVG.id != bear_arr.get(0).id))
-        FVG.display := box.new(top, bottom, border_width=0, bgcolor=color.new(color.orange, 85), extend=extend.right, xloc=xloc.bar_time)
-        FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=color.orange, extend=extend.right)
+        FVG.display := box.new(top, bottom, border_width=0, bgcolor=fvg_bear_box_color, extend=extend.right, xloc=xloc.bar_time)
+        FVG.midline := line.new(midpoint1, midpoint2, xloc.bar_time, color=fvg_bear_line_color, extend=extend.right)
         bear_arr.unshift(FVG)
 
 update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = low) =>
     array<int> closed_idxs = array.new<int>()
+    bool bull_fvg_m = false
+    bool bull_fvg_c = false
+
     for [idx, FVG] in bull_arr
         if not na(htf_close) and htf_close < FVG.bottom
+            bull_fvg_c := true
             box.delete(FVG.display)
             line.delete(FVG.midline)
             if not na(FVG.bounce_line)
@@ -186,15 +201,16 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
             array.unshift(closed_idxs, idx)
             continue
         if htf_low < FVG.middle and FVG.state != status.MITIGATED
+            bull_fvg_m := true
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
-            box.set_bgcolor(bx, color.new(color.silver, 50))
+            box.set_bgcolor(bx, fvg_mitigated_box_color)
             line.set_x2(ln, time + 1)
-            line.set_color(ln, color.black)
+            line.set_color(ln, fvg_mitigated_line_color)
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.bottom)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.bottom)
-            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=color.new(color.blue, 50), width=3)
+            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=fvg_bull_line_color, width=3)
             FVG.state := status.MITIGATED
             continue
         if htf_low > FVG.middle
@@ -202,10 +218,16 @@ update_bullish_fvgs(array<fvg> bull_arr, float htf_close = na, float htf_low = l
 
     garbage_collect(closed_idxs, bull_arr)
 
+    [bull_fvg_m, bull_fvg_c]
+
 update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = high) =>
     array<int> closed_idxs = array.new<int>()
+    bool bear_fvg_m = false
+    bool bear_fvg_c = false
+
     for [idx, FVG] in bear_arr
         if not na(htf_close) and htf_close > FVG.top
+            bear_fvg_c := true
             box.delete(FVG.display)
             line.delete(FVG.midline)
             if not na(FVG.bounce_line)
@@ -213,15 +235,16 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
             array.unshift(closed_idxs, idx)
             continue
         if htf_high > FVG.middle and FVG.state != status.MITIGATED
+            bear_fvg_m := true
             box bx = FVG.display
             line ln = FVG.midline
             box.set_right(bx, time)
-            box.set_bgcolor(bx, color.new(color.silver, 50))
+            box.set_bgcolor(bx, fvg_mitigated_box_color)
             line.set_x2(ln, time + 1)
-            line.set_color(ln, color.black)
+            line.set_color(ln, fvg_mitigated_line_color)
             chart.point bouncepoint1 = chart.point.from_time(FVG.start, FVG.top)
             chart.point bouncepoint2 = chart.point.from_time(timenow, FVG.top)
-            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=color.new(color.orange, 50), width=3)
+            FVG.bounce_line := line.new(bouncepoint1, bouncepoint2, xloc.bar_time, extend=extend.right, color=fvg_bear_line_color, width=3)
             FVG.state := status.MITIGATED
             continue
         if htf_high < FVG.middle
@@ -229,22 +252,26 @@ update_bearish_fvgs(array<fvg> bear_arr, float htf_close = na, float htf_high = 
     
     garbage_collect(closed_idxs, bear_arr)
 
-load_chart_fvgs() => 
-    var array<fvg> bull_fvgs = array.new<fvg>()
-    var array<fvg> bear_fvgs = array.new<fvg>()
+    [bear_fvg_m, bear_fvg_c]
 
-    fvg FVG = detect_fvg()
-    if not na(FVG)
-        plot_fvg(FVG, bull_fvgs, bear_fvgs)
+// load_chart_fvgs() => 
+//     var array<fvg> bull_fvgs = array.new<fvg>()
+//     var array<fvg> bear_fvgs = array.new<fvg>()
 
-    if bull_fvgs.size() > 0
-        update_bullish_fvgs(bull_fvgs, close[1])
+//     [FVG, bull_fvg_o, bear_fvg_o, htf_close, htf_high, htf_low] = detect_fvg()
+//     if not na(FVG)
+//         plot_fvg(FVG, bull_fvgs, bear_fvgs)
 
-    if bear_fvgs.size() > 0
-        update_bearish_fvgs(bear_fvgs, close[1])
+//     if bull_fvgs.size() > 0
+//         [bull_fvg_m, bull_fvg_c] = update_bullish_fvgs(bull_fvgs, htf_close, htf_low)
+
+//     if bear_fvgs.size() > 0
+//         [bear_fvg_m, bear_fvg_c] = update_bearish_fvgs(bear_fvgs, htf_close, htf_high)
 
 detect_ob() =>
     ob OB = na
+    bool bull_ob_o = false
+    bool bear_ob_o = false
     
     float trigger = ta.change(ta.rsi(close[1], 14), 1)
     float bull_pivot = ta.lowest(low[1], 2)
@@ -262,6 +289,7 @@ detect_ob() =>
         
         string id = str.format("{0}-{1}", x.price, y.price)
         OB := ob.new(id, x, y, sentiment.BULL, status.OPEN)
+        bull_ob_o := true
 
     if bear_pivot == ta.highest(high[1], ob_pivot_length) and trigger <= -ob_rsi_threshold
         chart.point x = chart.point.from_time(time - timeframe.in_seconds() * 1000, bear_pivot)
@@ -276,23 +304,28 @@ detect_ob() =>
         
         string id = str.format("{0}-{1}", x.price, y.price)
         OB := ob.new(id, x, y, sentiment.BEAR, status.OPEN)
+        bear_ob_o := true
     
-    OB
+    [OB, bull_ob_o, bear_ob_o, close, high, low]
 
 plot_ob(ob OB, array<ob> bull_arr, array<ob> bear_arr) =>
     if OB.direction == sentiment.BULL  and (bull_arr.size() == 0 or (bull_arr.size() != 0 and OB.id != bull_arr.get(0).id))
-        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.lime, 80), xloc = xloc.bar_time, border_color=color.lime)
+        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=ob_bull_box_color, xloc = xloc.bar_time, border_color=ob_bull_border_color)
         bull_arr.unshift(OB)
     else if OB.direction == sentiment.BEAR  and (bear_arr.size() == 0 or (bear_arr.size() != 0 and OB.id != bear_arr.get(0).id))
-        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=color.new(color.red, 80), xloc = xloc.bar_time, border_color=color.red)
+        OB.display := box.new(OB.top, OB.bottom, extend=extend.right, bgcolor=ob_bear_box_color, xloc = xloc.bar_time, border_color=ob_bear_border_color)
         bear_arr.unshift(OB)
     
 update_bullish_obs(array<ob> bull_arr, float htf_close = close, float htf_low = low) =>
     array<int> closed_idxs = array.new<int>()
+    bool bull_ob_m = false
+    bool bull_ob_c = false
+
     for [idx, OB] in bull_arr
         float top = OB.top.price
         float bottom = OB.bottom.price
         if htf_close[1] < bottom
+            bull_ob_c := true
             box.delete(OB.display)
             array.unshift(closed_idxs, idx)
             continue
@@ -301,23 +334,29 @@ update_bullish_obs(array<ob> bull_arr, float htf_close = close, float htf_low = 
         if htf_close > top and OB.state == status.MITIGATED
             OB.state := status.OPEN
             box bx = OB.display
-            bx.set_bgcolor(color.new(color.lime, 80))
+            bx.set_bgcolor(ob_bull_box_color)
             bx.set_border_width(0)
             continue
         if htf_low < top and OB.state == status.OPEN
+            bull_ob_m := true
             OB.state := status.MITIGATED
             box bx = OB.display
-            bx.set_bgcolor(color.new(color.silver, 80))
-            bx.set_border_width(5)
+            bx.set_bgcolor(ob_bull_mitigated_color)
+            bx.set_border_width(3)
         
     garbage_collect(closed_idxs, bull_arr)
+    [bull_ob_m, bull_ob_c]
 
 update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high = high) =>
     array<int> closed_idxs = array.new<int>()
+    bool bear_ob_m = false
+    bool bear_ob_c = false
+
     for [idx, OB] in bear_arr
         float top = OB.top.price
         float bottom = OB.bottom.price
         if htf_close[1] > top
+            bear_ob_c := true
             box.delete(OB.display)
             array.unshift(closed_idxs, idx)
             continue
@@ -326,16 +365,18 @@ update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high =
         if htf_close < bottom and OB.state == status.MITIGATED
             OB.state := status.OPEN
             box bx = OB.display
-            bx.set_bgcolor(color.new(color.red, 80))
+            bx.set_bgcolor(ob_bear_box_color)
             bx.set_border_width(0)
             continue
         if htf_high > bottom and OB.state == status.OPEN
+            bear_ob_m := true
             OB.state := status.MITIGATED
             box bx = OB.display
-            bx.set_bgcolor(color.new(color.silver, 80))
-            bx.set_border_width(5)
+            bx.set_bgcolor(ob_bear_mitigated_color)
+            bx.set_border_width(3)
         
     garbage_collect(closed_idxs, bear_arr)
+    [bear_ob_m, bear_ob_c]
 
 
 
@@ -343,172 +384,336 @@ update_bearish_obs(array<ob> bear_arr, float htf_close = close, float htf_high =
 // Line of logic that is run for every bar execution
 
 
+// Booleans
+var bool new_fvg_opened = false
+var bool new_fvg_mitigated = false
+var bool new_fvg_closed = false
+var bool new_ob_opened = false
+var bool new_ob_mitigated = false
+var bool new_ob_closed = false
+
+var bool bull_fvg_opened = false
+var bool bull_fvg_mitigated = false
+var bool bull_fvg_closed = false
+var bool bear_fvg_opened = false
+var bool bear_fvg_mitigated = false
+var bool bear_fvg_closed = false
+var bool bull_ob_opened = false
+var bool bull_ob_mitigated = false
+var bool bull_ob_closed = false
+var bool bear_ob_opened = false
+var bool bear_ob_mitigated = false
+var bool bear_ob_closed = false
+
+
 // Fair Value Gaps
-// if time < timestamp(2026, da_month, da_day + 1)
 if display_fvgs
-    if fvg_multiTF
-        if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
-            runtime.error("""While FVG Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
-            higher timeframes chosen.""")
+    if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
+        runtime.error("""While FVG Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
+        higher timeframes chosen.""")
 
-        array<string> selected_tfs = array.new<string>()
-        
-        if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
-            selected_tfs.unshift(htf1)
+    array<string> selected_tfs = array.new<string>()
+    
+    if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
+        selected_tfs.unshift(htf1)
 
-            if na(htf1) or htf1 == timeframe.main_period
-                load_chart_fvgs()
-            else
-                var array<fvg> bull_fvgs_1 = array.new<fvg>()
-                var array<fvg> bear_fvgs_1 = array.new<fvg>()
-                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, [detect_fvg(), close[1], high, low])
-                if not na(FVG)
-                    plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
+        // if na(htf1) or htf1 == timeframe.main_period
+        //     load_chart_fvgs()
+        // else
+        var array<fvg> bull_fvgs_1 = array.new<fvg>()
+        var array<fvg> bear_fvgs_1 = array.new<fvg>()
+        [FVG, bull_fvg_o, bear_fvg_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, detect_fvg())
 
-                if bull_fvgs_1.size() > 0
-                    update_bullish_fvgs(bull_fvgs_1, htf_close, htf_low)
+        bull_fvg_opened := bull_fvg_o
+        bear_fvg_opened := bear_fvg_o
+        new_fvg_opened := bull_fvg_opened or bear_fvg_opened
+        new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
+        new_fvg_closed := bull_fvg_closed or bear_fvg_closed
 
-                if bear_fvgs_1.size() > 0
-                    update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
+        if not na(FVG)
+            plot_fvg(FVG, bull_fvgs_1, bear_fvgs_1)
+
+        if bull_fvgs_1.size() > 0
+            [bull_fvg_m, bull_fvg_c] = update_bullish_fvgs(bull_fvgs_1, htf_close, htf_low)
+            bull_fvg_mitigated := bull_fvg_m
+            bull_fvg_closed := bull_fvg_c
+        else
+            bull_fvg_mitigated := false
+            bull_fvg_closed := false
+
+        if bear_fvgs_1.size() > 0
+            [bear_fvg_m, bear_fvg_c] = update_bearish_fvgs(bear_fvgs_1, htf_close, htf_high)
+            bear_fvg_mitigated := bear_fvg_m
+            bear_fvg_closed := bear_fvg_c
+        else
+            bear_fvg_mitigated := false
+            bear_fvg_closed := false
             
-        if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
-            selected_tfs.unshift(htf2)
+        new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
+        new_fvg_closed := bull_fvg_closed or bear_fvg_closed
+        
+    if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
+        selected_tfs.unshift(htf2)
 
-            if na(htf2) or htf2 == timeframe.main_period
-                load_chart_fvgs()
-            else
-                var array<fvg> bull_fvgs_2 = array.new<fvg>()
-                var array<fvg> bear_fvgs_2 = array.new<fvg>()
+        var array<fvg> bull_fvgs_2 = array.new<fvg>()
+        var array<fvg> bear_fvgs_2 = array.new<fvg>()
 
-                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, [detect_fvg(), close[1], high, low])
-                if not na(FVG)
-                    plot_fvg(FVG, bull_fvgs_2, bear_fvgs_2)
+        [FVG, bull_fvg_o, bear_fvg_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, detect_fvg())
+        
+        bull_fvg_opened := bull_fvg_o
+        bear_fvg_opened := bear_fvg_o
+        new_fvg_opened := bull_fvg_opened or bear_fvg_opened
 
-                if bull_fvgs_2.size() > 0
-                    update_bullish_fvgs(bull_fvgs_2, htf_close, htf_low)
+        if not na(FVG)
+            plot_fvg(FVG, bull_fvgs_2, bear_fvgs_2)
 
-                if bear_fvgs_2.size() > 0
-                    update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
+        if bull_fvgs_2.size() > 0
+            [bull_fvg_m, bull_fvg_c] = update_bullish_fvgs(bull_fvgs_2, htf_close, htf_low)
+            bull_fvg_mitigated := bull_fvg_m
+            bull_fvg_closed := bull_fvg_c
+        else
+            bull_fvg_mitigated := false
+            bull_fvg_closed := false
 
-        if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
-            selected_tfs.unshift(htf3)
+        if bear_fvgs_2.size() > 0
+            [bear_fvg_m, bear_fvg_c] = update_bearish_fvgs(bear_fvgs_2, htf_close, htf_high)
+            bear_fvg_mitigated := bear_fvg_m
+            bear_fvg_closed := bear_fvg_c
+        else
+            bear_fvg_mitigated := false
+            bear_fvg_closed := false
+            
+        new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
+        new_fvg_closed := bull_fvg_closed or bear_fvg_closed
 
-            if na(htf3) or htf3 == timeframe.main_period
-                load_chart_fvgs()
-            else
-                var array<fvg> bull_fvgs_3 = array.new<fvg>()
-                var array<fvg> bear_fvgs_3 = array.new<fvg>()
+    if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
+        selected_tfs.unshift(htf3)
 
-                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, [detect_fvg(), close[1], high, low])
-                if not na(FVG)
-                    plot_fvg(FVG, bull_fvgs_3, bear_fvgs_3)
+        var array<fvg> bull_fvgs_3 = array.new<fvg>()
+        var array<fvg> bear_fvgs_3 = array.new<fvg>()
 
-                if bull_fvgs_3.size() > 0
-                    update_bullish_fvgs(bull_fvgs_3, htf_close, htf_low)
+        [FVG, bull_fvg_o, bear_fvg_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, detect_fvg())
+        
+        bull_fvg_opened := bull_fvg_o
+        bear_fvg_opened := bear_fvg_o
+        new_fvg_opened := bull_fvg_opened or bear_fvg_opened
 
-                if bear_fvgs_3.size() > 0
-                    update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
+        if not na(FVG)
+            plot_fvg(FVG, bull_fvgs_3, bear_fvgs_3)
 
-        if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
-            selected_tfs.unshift(htf4)
+        if bull_fvgs_3.size() > 0
+            [bull_fvg_m, bull_fvg_c] = update_bullish_fvgs(bull_fvgs_3, htf_close, htf_low)
+            bull_fvg_mitigated := bull_fvg_m
+            bull_fvg_closed := bull_fvg_c
+        else
+            bull_fvg_mitigated := false
+            bull_fvg_closed := false
 
-            if na(htf4) or htf4 == timeframe.main_period
-                load_chart_fvgs()
-            else
-                var array<fvg> bull_fvgs_4 = array.new<fvg>()
-                var array<fvg> bear_fvgs_4 = array.new<fvg>()
+        if bear_fvgs_3.size() > 0
+            [bear_fvg_m, bear_fvg_c] = update_bearish_fvgs(bear_fvgs_3, htf_close, htf_high)
+            bear_fvg_mitigated := bear_fvg_m
+            bear_fvg_closed := bear_fvg_c
+        else
+            bear_fvg_mitigated := false
+            bear_fvg_closed := false
+            
+        new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
+        new_fvg_closed := bull_fvg_closed or bear_fvg_closed
 
-                [FVG, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, [detect_fvg(), close[1], high, low])
-                if not na(FVG)
-                    plot_fvg(FVG, bull_fvgs_4, bear_fvgs_4)
+    if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
+        selected_tfs.unshift(htf4)
 
-                if bull_fvgs_4.size() > 0
-                    update_bullish_fvgs(bull_fvgs_4, htf_close, htf_low)
+        var array<fvg> bull_fvgs_4 = array.new<fvg>()
+        var array<fvg> bear_fvgs_4 = array.new<fvg>()
 
-                if bear_fvgs_4.size() > 0
-                    update_bearish_fvgs(bear_fvgs_4, htf_close, htf_high)
-    else
-        load_chart_fvgs()
+        [FVG, bull_fvg_o, bear_fvg_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, detect_fvg())
+        
+        bull_fvg_opened := bull_fvg_o
+        bear_fvg_opened := bear_fvg_o
+        new_fvg_opened := bull_fvg_opened or bear_fvg_opened
 
+        if not na(FVG)
+            plot_fvg(FVG, bull_fvgs_4, bear_fvgs_4)
+
+        if bull_fvgs_4.size() > 0
+            [bull_fvg_m, bull_fvg_c] = update_bullish_fvgs(bull_fvgs_4, htf_close, htf_low)
+            bull_fvg_mitigated := bull_fvg_m
+            bull_fvg_closed := bull_fvg_c
+        else
+            bull_fvg_mitigated := false
+            bull_fvg_closed := false
+
+        if bear_fvgs_4.size() > 0
+            [bear_fvg_m, bear_fvg_c] = update_bearish_fvgs(bear_fvgs_4, htf_close, htf_high)
+            bear_fvg_mitigated := bear_fvg_m
+            bear_fvg_closed := bear_fvg_c
+        else
+            bear_fvg_mitigated := false
+            bear_fvg_closed := false
+            
+        new_fvg_mitigated := bull_fvg_mitigated or bear_fvg_mitigated
+        new_fvg_closed := bull_fvg_closed or bear_fvg_closed
 
 // Order Block
 if display_OBs
-    if ob_multiTF
-        if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
-            runtime.error("""While OB Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
-            higher timeframes chosen.""")
+    if not na(incorrect_tf(htf1, htf2, htf3, htf4, display_htf1, display_htf2, display_htf3, display_htf4))
+        runtime.error("""While OB Multi Timeframe Display Toggle is enabled in settings, the timeframe of the chart must not be greater than any 
+        higher timeframes chosen.""")
 
-        array<string> selected_tfs = array.new<string>()
-        
-        if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
-            selected_tfs.unshift(htf1)
-            var array<ob> bull_obs_1 = array.new<ob>()
-            var array<ob> bear_obs_1 = array.new<ob>()
-            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, [detect_ob(), close, high, low])
-            if not na(OB)
-                plot_ob(OB, bull_obs_1, bear_obs_1)
-
-            if bull_obs_1.size() > 0
-                update_bullish_obs(bull_obs_1, htf_close, htf_low)
-
-            if bear_obs_1.size() > 0
-                update_bearish_obs(bear_obs_1, htf_close, htf_high)
-
-        if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
-            selected_tfs.unshift(htf2)
-            var array<ob> bull_obs_2 = array.new<ob>()
-            var array<ob> bear_obs_2 = array.new<ob>()
-            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, [detect_ob(), close, high, low])
-            if not na(OB)
-                plot_ob(OB, bull_obs_2, bear_obs_2)
-
-            if bull_obs_2.size() > 0
-                update_bullish_obs(bull_obs_2, htf_close, htf_low)
-
-            if bear_obs_2.size() > 0
-                update_bearish_obs(bear_obs_2, htf_close, htf_high)
-
-        if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
-            selected_tfs.unshift(htf3)
-            var array<ob> bull_obs_3 = array.new<ob>()
-            var array<ob> bear_obs_3 = array.new<ob>()
-            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, [detect_ob(), close, high, low])
-            if not na(OB)
-                plot_ob(OB, bull_obs_3, bear_obs_3)
-
-            if bull_obs_3.size() > 0
-                update_bullish_obs(bull_obs_3, htf_close, htf_low)
-
-            if bear_obs_3.size() > 0
-                update_bearish_obs(bear_obs_3, htf_close, htf_high)
-        
-        if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
-            selected_tfs.unshift(htf4)
-            var array<ob> bull_obs_4 = array.new<ob>()
-            var array<ob> bear_obs_4 = array.new<ob>()
-            [OB, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, [detect_ob(), close, high, low])
-            if not na(OB)
-                plot_ob(OB, bull_obs_4, bear_obs_4)
-
-            if bull_obs_4.size() > 0
-                update_bullish_obs(bull_obs_4, htf_close, htf_low)
-
-            if bear_obs_4.size() > 0
-                update_bearish_obs(bear_obs_4, htf_close, htf_high)
-    else
-        var array<ob> bull_obs = array.new<ob>()
-        var array<ob> bear_obs = array.new<ob>()
-        ob OB = detect_ob()
-        if not na(OB)
-            plot_ob(OB, bull_obs, bear_obs)
-        if bull_obs.size() > 0
-            update_bullish_obs(bull_obs, close, low)
-        if bear_obs.size() > 0
-            update_bearish_obs(bear_obs, close, high)
-
+    array<string> selected_tfs = array.new<string>()
     
+    if display_htf1 and na(duplicate_tf(htf1, selected_tfs))
+        selected_tfs.unshift(htf1)
+        var array<ob> bull_obs_1 = array.new<ob>()
+        var array<ob> bear_obs_1 = array.new<ob>()
+        [OB, bull_ob_o, bear_ob_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf1, detect_ob())
+        
+        bull_ob_opened := bull_ob_o
+        bear_ob_opened := bear_ob_o
+        new_ob_opened := bull_ob_opened or bear_ob_opened
+        
+        if not na(OB)
+            plot_ob(OB, bull_obs_1, bear_obs_1)
 
-//current colors are placeholders; add settings for colors later as well
+        if bull_obs_1.size() > 0
+            [bull_ob_m, bull_ob_c] = update_bullish_obs(bull_obs_1, htf_close, htf_low)
+            bull_ob_mitigated := bull_ob_m
+            bull_ob_closed := bull_ob_c
+        else
+            bull_ob_mitigated := false
+            bull_ob_closed := false
+
+        if bear_obs_1.size() > 0
+            [bear_ob_m, bear_ob_c] = update_bearish_obs(bear_obs_1, htf_close, htf_high)
+            bear_ob_mitigated := bear_ob_m
+            bear_ob_closed := bear_ob_c
+        else
+            bear_ob_mitigated := false
+            bear_ob_closed := false
+
+        new_ob_mitigated := bull_ob_mitigated or bear_ob_mitigated
+        new_ob_closed := bull_ob_closed or bear_ob_closed
+
+    if display_htf2 and na(duplicate_tf(htf2, selected_tfs))
+        selected_tfs.unshift(htf2)
+        var array<ob> bull_obs_2 = array.new<ob>()
+        var array<ob> bear_obs_2 = array.new<ob>()
+        [OB, bull_ob_o, bear_ob_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf2, detect_ob())
+        
+        bull_ob_opened := bull_ob_o
+        bear_ob_opened := bear_ob_o
+        new_ob_opened := bull_ob_opened or bear_ob_opened
+        
+        if not na(OB)
+            plot_ob(OB, bull_obs_2, bear_obs_2)
+
+        if bull_obs_2.size() > 0
+            [bull_ob_m, bull_ob_c] = update_bullish_obs(bull_obs_2, htf_close, htf_low)
+            bull_ob_mitigated := bull_ob_m
+            bull_ob_closed := bull_ob_c
+        else
+            bull_ob_mitigated := false
+            bull_ob_closed := false
+
+        if bear_obs_2.size() > 0
+            [bear_ob_m, bear_ob_c] = update_bearish_obs(bear_obs_2, htf_close, htf_high)
+            bear_ob_mitigated := bear_ob_m
+            bear_ob_closed := bear_ob_c
+        else
+            bear_ob_mitigated := false
+            bear_ob_closed := false
+
+        new_ob_mitigated := bull_ob_mitigated or bear_ob_mitigated
+        new_ob_closed := bull_ob_closed or bear_ob_closed
+
+    if display_htf3 and na(duplicate_tf(htf3, selected_tfs))
+        selected_tfs.unshift(htf3)
+        var array<ob> bull_obs_3 = array.new<ob>()
+        var array<ob> bear_obs_3 = array.new<ob>()
+        [OB, bull_ob_o, bear_ob_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf3, detect_ob())
+        
+        bull_ob_opened := bull_ob_o
+        bear_ob_opened := bear_ob_o
+        new_ob_opened := bull_ob_opened or bear_ob_opened
+        
+        if not na(OB)
+            plot_ob(OB, bull_obs_3, bear_obs_3)
+
+        if bull_obs_3.size() > 0
+            [bull_ob_m, bull_ob_c] = update_bullish_obs(bull_obs_3, htf_close, htf_low)
+            bull_ob_mitigated := bull_ob_m
+            bull_ob_closed := bull_ob_c
+        else
+            bull_ob_mitigated := false
+            bull_ob_closed := false
+
+        if bear_obs_3.size() > 0
+            [bear_ob_m, bear_ob_c] = update_bearish_obs(bear_obs_3, htf_close, htf_high)
+            bear_ob_mitigated := bear_ob_m
+            bear_ob_closed := bear_ob_c
+        else
+            bear_ob_mitigated := false
+            bear_ob_closed := false
+
+        new_ob_mitigated := bull_ob_mitigated or bear_ob_mitigated
+        new_ob_closed := bull_ob_closed or bear_ob_closed
+
+    if display_htf4 and na(duplicate_tf(htf4, selected_tfs))
+        selected_tfs.unshift(htf4)
+        var array<ob> bull_obs_4 = array.new<ob>()
+        var array<ob> bear_obs_4 = array.new<ob>()
+        [OB, bull_ob_o, bear_ob_o, htf_close, htf_high, htf_low] = request.security(syminfo.tickerid, htf4, detect_ob())
+        
+        bull_ob_opened := bull_ob_o
+        bear_ob_opened := bear_ob_o
+        new_ob_opened := bull_ob_opened or bear_ob_opened
+    
+        if not na(OB)
+            plot_ob(OB, bull_obs_4, bear_obs_4)
+
+        if bull_obs_4.size() > 0
+            [bull_ob_m, bull_ob_c] = update_bullish_obs(bull_obs_4, htf_close, htf_low)
+            bull_ob_mitigated := bull_ob_m
+            bull_ob_closed := bull_ob_c
+        else
+            bull_ob_mitigated := false
+            bull_ob_closed := false
+
+        if bear_obs_4.size() > 0
+            [bear_ob_m, bear_ob_c] = update_bearish_obs(bear_obs_4, htf_close, htf_high)
+            bear_ob_mitigated := bear_ob_m
+            bear_ob_closed := bear_ob_c
+        else
+            bear_ob_mitigated := false
+            bear_ob_closed := false
+
+        new_ob_mitigated := bull_ob_mitigated or bear_ob_mitigated
+        new_ob_closed := bull_ob_closed or bear_ob_closed
+
+
+// ALERTS
+
+alertcondition(new_fvg_opened, "FVG Opened", "New FVG has been plotted!")
+alertcondition(new_fvg_mitigated, "FVG Mitigated", "A FVG has been mitigated!")
+alertcondition(new_fvg_closed, "FVG Closed", "A FVG has been closed!")
+alertcondition(new_ob_opened, "OB Opened", "New OB has been plotted!")
+alertcondition(new_ob_mitigated, "OB Mitigated", "An OB has been mitigated!")
+alertcondition(new_ob_closed, "OB Closed", "An OB has been closed!")
+
+alertcondition(bull_fvg_opened, "Bullish FVG Opened", "New Bullish FVG has been plotted!")
+alertcondition(bull_fvg_mitigated, "Bullish FVG Mitigated", "Bullish FVG has been mitigated!")
+alertcondition(bull_fvg_closed, "Bullish FVG Closed", "Bullish FVG has been closed!")
+alertcondition(bear_fvg_opened, "Bearish FVG Opened", "New Bearish FVG has been plotted!")
+alertcondition(bear_fvg_mitigated, "Bearish FVG Mitigated", "Bearish FVG has been mitigated!")
+alertcondition(bear_fvg_closed, "Bearish FVG Closed", "Bearish FVG has been closed!")
+
+alertcondition(bull_ob_opened, "Bullish OB Opened", "New Bullish OB has been plotted!")
+alertcondition(bull_ob_mitigated, "Bullish OB Mitigated", "Bullish OB has been mitigated!")
+alertcondition(bull_ob_closed, "Bullish OB Closed", "Bullish OB has been closed!")
+alertcondition(bear_ob_opened, "Bearish OB Opened", "New Bearish OB has been plotted!")
+alertcondition(bear_ob_mitigated, "Bearish OB Mitigated", "Bearish OB has been mitigated!")
+alertcondition(bear_ob_closed, "Bearish OB Closed", "Bearish OB has been closed!")
+
 
 //add setting for fvgs to only be made from candle during market hours
 // using 'time' variable makes FVGs from overnight get plotted a little off,
